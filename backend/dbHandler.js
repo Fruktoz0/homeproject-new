@@ -47,7 +47,7 @@ const transactions = dbConnection.define("transaction", {
         allowNull: false,
     },
     'type': {
-        type: DataTypes.ENUM("income", "expense"),
+        type: DataTypes.ENUM("INCOME", "EXPENSE"),
         allowNull: false,
     },
     'category': {
@@ -135,8 +135,8 @@ const recurringItems = dbConnection.define("recurringItem", {
         allowNull: false,
     },
     'frequency': {
-        type: DataTypes.ENUM("monthly", "quarterly", "half-yearly", "yearly"),
-        defaultValue: "monthly",
+        type: DataTypes.ENUM("MONTHLY", "QUARTERLY", "HALF-YEARLY", "YEARLY"),
+        defaultValue: "MONTHLY",
         allowNull: false,
     },
     'active': {
@@ -200,7 +200,7 @@ const savingGoals = dbConnection.define("savingGoal", {
     },
     'targetAmount': {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
     },
     'householdId': {
         type: DataTypes.UUID,

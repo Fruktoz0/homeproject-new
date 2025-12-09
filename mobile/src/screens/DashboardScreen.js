@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, StatusBar, SafeAreaView } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, StatusBar, SafeAreaView, TouchableOpacity } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'; // Ikonok
 
@@ -8,26 +8,33 @@ import { getTransactions } from '../services/transactionService';
 import { getCurrentHousehold } from '../services/householdService';
 import { COLORS } from '../constants';
 import { Card, SectionHeader, FloatingActionButton } from '../components/UIComponents';
+import { createTransaction } from '../services/transactionService';
+import { AddTransactionModal } from '../components/Modals';
+import { getStartOfMonth, getEndOfMonth, addMonths, formatMonthYear, formatDateToISO } from '../utils/dateUtils';
 
 const DashboardScreen = ({ navigation }) => {
     const { userData } = useContext(AuthContext);
+    const [currentDate, setCurrentDate] = useState(new Date());
     const [transactions, setTransactions] = useState([]);
     const [household, setHousehold] = useState(null);
     const [refreshing, setRefreshing] = useState(false);
     const [totals, setTotals] = useState({ income: 0, expense: 0, balance: 0 });
+    const [isModalVisible, setModalVisible] = useState(false);
+
 
     // Adatok betöltése
     const loadData = async () => {
         try {
-            // 1. Háztartás adatainak lekérése (név, pénznem)
             const hhData = await getCurrentHousehold();
             setHousehold(hhData);
 
-            // 2. Tranzakciók lekérése (jelenlegi hónap)
-            const txData = await getTransactions();
+            // Kiszámoljuk a hónap elejét és végét YYYY-MM-DD stringben
+            const start = formatDateToISO(getStartOfMonth(currentDate));
+            const end = formatDateToISO(getEndOfMonth(currentDate));
+
+            const txData = await getTransactions(start, end);
             setTransactions(txData);
 
-            // 3. Összesítés számolása
             let inc = 0, exp = 0;
             txData.forEach(t => {
                 if (t.type === 'INCOME') inc += Number(t.amount);
@@ -39,21 +46,25 @@ const DashboardScreen = ({ navigation }) => {
             console.log("Adatbetöltési hiba:", error);
         }
     };
-
+    // Ha változik a currentDate, töltsük újra az adatokat!
     const onRefresh = async () => {
         setRefreshing(true);
         await loadData();
         setRefreshing(false);
     };
 
+    useEffect(() => {
+        loadData();
+    }, [currentDate]);
+
     // Amikor a képernyő fókuszba kerül (pl. visszalépünk ide), frissítünk
     useFocusEffect(
         useCallback(() => {
             loadData();
-        }, [])
+        }, [currentDate])
     );
 
-    // --- UI SEGÉDFÜGGVÉNYEK ---
+    // UI SEGÉDFÜGGVÉNYEK
     const formatMoney = (amount) => {
         return new Intl.NumberFormat('hu-HU', {
             style: 'currency',
@@ -67,6 +78,16 @@ const DashboardScreen = ({ navigation }) => {
         return `${date.getMonth() + 1}.${date.getDate()}.`;
     };
 
+    const handleAddTransaction = async (data) => {
+        await createTransaction(data);
+        // Frissítjük a listát mentés után
+        loadData();
+    };
+
+    // Navigáció segédfüggvények
+    const nextMonth = () => setCurrentDate(addMonths(currentDate, 1));
+    const prevMonth = () => setCurrentDate(addMonths(currentDate, -1));
+
     // Tranzakció lista elem renderelése
     const renderItem = ({ item }) => (
         <View style={styles.transactionItem}>
@@ -76,7 +97,7 @@ const DashboardScreen = ({ navigation }) => {
                 item.type === 'INCOME' ? styles.iconIncome : styles.iconExpense
             ]}>
                 <MaterialCommunityIcons
-                    name={item.type === 'INCOME' ? 'arrow-down' : 'arrow-up'}
+                    name={item.type === 'INCOME' ? 'arrow-up' : 'arrow-down'}
                     size={20}
                     color={item.type === 'INCOME' ? COLORS.success : COLORS.danger}
                 />
@@ -112,8 +133,18 @@ const DashboardScreen = ({ navigation }) => {
             {/* --- HEADER (KÉK RÉSZ) --- */}
             <View style={styles.header}>
                 <View style={styles.headerTop}>
-                    <Text style={styles.headerTitle}>{household?.name || 'Betöltés...'}</Text>
-                    <Text style={styles.headerUser}>{userData?.displayName}</Text>
+                    {/* DÁTUM VÁLASZTÓ (Középen) */}
+                    <View style={styles.dateSelector}>
+                        <TouchableOpacity onPress={prevMonth} style={styles.arrowBtn}>
+                            <MaterialCommunityIcons name="chevron-left" size={28} color="rgba(255,255,255,0.8)" />
+                        </TouchableOpacity>
+
+                        <Text style={styles.headerDate}>{formatMonthYear(currentDate)}</Text>
+
+                        <TouchableOpacity onPress={nextMonth} style={styles.arrowBtn}>
+                            <MaterialCommunityIcons name="chevron-right" size={28} color="rgba(255,255,255,0.8)" />
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 {/* EGYENLEG BLOKK */}
@@ -159,10 +190,17 @@ const DashboardScreen = ({ navigation }) => {
                 />
             </View>
 
-            {/* --- LEBEGŐ GOMB (FAB) --- */}
+            {/* LEBEGŐ GOMB (FAB) */}
             <FloatingActionButton
                 icon={<Ionicons name="add" size={30} color="#FFF" />}
-                onPress={() => console.log('Új tétel hozzáadása... (Később implementáljuk)')}
+                onPress={() => setModalVisible(true)}
+            />
+
+            {/* ÚJ TRanzakció MODAL */}
+            <AddTransactionModal
+                visible={isModalVisible}
+                onClose={() => setModalVisible(false)}
+                onSubmit={handleAddTransaction}
             />
         </View>
     );
@@ -182,16 +220,52 @@ const styles = StyleSheet.create({
         zIndex: 1,
     },
     headerTop: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 20
     },
-    headerTitle: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
-    headerUser: { color: 'rgba(255,255,255,0.8)', fontSize: 14 },
-    balanceContainer: { alignItems: 'center', paddingBottom: 20 },
-    balanceLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 14, marginBottom: 5 },
-    balanceValue: { color: COLORS.white, fontSize: 36, fontWeight: 'bold' },
+    headerTitle: {
+        color: 'rgba(255,255,255,0.8)',
+        fontSize: 14,
+        fontWeight: '600'
+    },
+    headerUser: {
+        color: 'rgba(255,255,255,0.8)',
+        fontSize: 14
+    },
+    dateSelector: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10
+    },
+    headerDate: {
+        color: COLORS.white,
+        fontSize: 18,
+        fontWeight: 'bold',
+        textTransform: 'capitalize',
+        minWidth: 150,
+        textAlign: 'center'
+    },
+    arrowBtn: {
+        padding: 5,
+        // Opcionális: háttér a gombnak
+        // backgroundColor: 'rgba(255,255,255,0.1)',
+        // borderRadius: 20
+    },
+    balanceContainer: {
+        alignItems: 'center',
+        paddingBottom: 20
+    },
+    balanceLabel: {
+        color: 'rgba(255,255,255,0.8)',
+        fontSize: 14,
+        marginBottom: 5
+    },
+    balanceValue: {
+        color: COLORS.white,
+        fontSize: 36,
+        fontWeight: 'bold'
+    },
 
     // Statisztika kártya (ami "belóg" a headerbe)
     statsCardContainer: {

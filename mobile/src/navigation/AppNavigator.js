@@ -6,9 +6,9 @@ import { ActivityIndicator, View } from 'react-native';
 import { COLORS } from '../constants';
 
 import AuthScreen from '../screens/AuthScreen';
-import DashboardScreen from '../screens/DashboardScreen';
 import HouseholdSetupScreen from '../screens/HouseholdSetupScreen';
 import PendingScreen from '../screens/PendingScreen';
+import TabNavigator from './TabNavigator';
 
 const Stack = createStackNavigator();
 
@@ -41,7 +41,7 @@ const AppNavigator = () => {
                             <Stack.Screen name="Pending" component={PendingScreen} />
                         ) : (
                             // 4. ESET: Minden OK, mehet a Dashboard
-                            <Stack.Screen name="Dashboard" component={DashboardScreen} />
+                            <Stack.Screen name="HomeTabs" component={TabNavigator} />
                         )}
                     </>
                 )}
