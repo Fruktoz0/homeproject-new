@@ -17,7 +17,9 @@ server.use('/api/savings', require('./routes/savingGoalsRoutes'));
 (async () => {
     try {
         await dbHandler.dbConnection.sync({ alter: true });
-        console.log("Database connected at port", PORT);
+        server.listen(PORT, () => {
+            console.log(`\n Database connected at port ${PORT}`)
+        })
     } catch (error) {
         console.log("Database connection error", error);
     }

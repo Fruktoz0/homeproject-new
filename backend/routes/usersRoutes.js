@@ -3,6 +3,7 @@ const router = express.Router();
 const { users } = require("../dbHandler");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const authMiddleware = require("../middleware/authMiddleware");
 
 // Regisztráció
 router.post('/register', async (req, res) => {
@@ -93,6 +94,26 @@ router.post('/login', async (req, res) => {
         res.status(500).json({ message: "Szerver hiba a bejelentkezés során." });
     }
 });
+
+// Aktuális felhasználó lekérése
+router.get('/me', authMiddleware, async (req, res) => {
+    try {
+        const user = await users.findByPk(req.user.id);
+        if (!user) {
+            return res.status(404).json({ message: "Felhasználó nem található." });
+        }
+
+        res.json({
+            id: user.id,
+            email: user.email,
+            displayName: user.displayName,
+            householdId: user.householdId,
+            membershipStatus: user.membershipStatus
+        });
+    } catch (error) {
+        res.status(500).json({ message: "Hiba az adatok lekérésekor." });
+    }
+})
 
 
 
