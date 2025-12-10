@@ -101,44 +101,38 @@ router.post('/', authMiddleware, async (req, res) => {
 // TRANZAKCIÓ TÖRLÉSE
 router.delete('/:id', authMiddleware, async (req, res) => {
     try {
-        const txId = req.params.id;
-        const userId = req.user.id;
+        const { id } = req.params;
+        const user = await users.findByPk(req.user.id);
 
-        const tx = await transactions.findByPk(txId);
+        const transaction = await transactions.findByPk(id);
 
-        if (!tx) {
-            return res.status(404).json({ message: "Tranzakció nem található." });
+        if (!transaction) return res.status(404).json({ message: "Tranzakció nem található." });
+
+        // Egyszerűsített ellenőrzés:
+        if (transaction.createdBy !== user.id) {
+            return res.status(403).json({ message: "Nem te adtad hozzá ezt a tranzakciót, nem tudod törölni." });
         }
 
-        // Jogosultság ellenőrzése: Csak akkor törölheti, ha ugyanabban a háztartásban van a létrehozó, mint a törlő
-        // (Vagy szigorúbban: csak a sajátját törölheti, de családban általában mindenki törölhet)
-        const currentUser = await users.findByPk(userId);
-        const creatorUser = await users.findByPk(tx.createdBy); // Aki létrehozta
+        await transaction.destroy();
 
-        // Ha a létrehozó már törölve lett, vagy nem ugyanaz a householdId...
-        if (!creatorUser || creatorUser.householdId !== currentUser.householdId) {
-            return res.status(403).json({ message: "Nincs jogosultságod törölni ezt a tételt." });
-        }
-
-        // Soft Delete (Mivel a paranoid: true be van kapcsolva a modellben)
-        await tx.destroy();
-
-        // Naplózás
+        // LOGOLÁS
+        const { auditLogs } = require('../dbHandler');
         await auditLogs.create({
             actionType: 'DELETE_TRANSACTION',
-            originalData: JSON.stringify({ id: tx.id, amount: tx.amount, desc: tx.description }),
-            performedByUserId: userId,
-            householdId: currentUser.householdId
+            originalData: JSON.stringify({
+                amount: transaction.amount,
+                desc: transaction.description
+            }),
+            performedByUserId: user.id,
+            householdId: user.householdId
         });
 
-        res.json({ message: "Tranzakció sikeresen törölve." });
-
-    } catch (error) {
-        console.error("Törlési hiba:", error);
-        res.status(500).json({ message: "Szerver hiba történt." });
+        res.json({ message: "Sikeres törlés." });
+    } catch (e) {
+        console.log(e);
+        res.status(500).json({ message: "Szerver hiba." });
     }
 });
-
 
 
 
