@@ -39,7 +39,6 @@ router.post('/', authMiddleware, async (req, res) => {
             name,
             amount,
             frequency: frequency || 'MONTHLY',
-            category: category || 'Egyéb',
             active: true,
             autoPay: autoPay || false,
             payDay: payDay || null,

@@ -13,6 +13,7 @@ server.use('/api/transactions', require('./routes/transactionsRoutes'));
 server.use('/api/households', require('./routes/householdRoutes'));
 server.use('/api/recurring', require('./routes/recurringItemsRoutes'));
 server.use('/api/savings', require('./routes/savingGoalsRoutes'));
+server.use('/api/audit-logs', require('./routes/auditLogsRoutes'));
 
 (async () => {
     try {

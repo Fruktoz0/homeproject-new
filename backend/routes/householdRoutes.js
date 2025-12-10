@@ -138,4 +138,160 @@ router.get('/current', authMiddleware, async (req, res) => {
     }
 });
 
+// TAG JÓVÁHAGYÁSA 
+router.put('/members/:memberId/approve', authMiddleware, async (req, res) => {
+    try {
+        const { memberId } = req.params;
+        const userId = req.user.id;
+
+        // Ellenőrzés: Csak a tulajdonos hagyhat jóvá
+        const household = await households.findOne({ where: { ownerId: userId } });
+        if (!household) return res.status(403).json({ message: "Csak a tulajdonos kezelheti a tagokat." });
+
+        const member = await users.findByPk(memberId);
+        if (!member || member.householdId !== household.id) return res.status(404).json({ message: "A tag nem található ebben a háztartásban." });
+
+        await member.update({ membershipStatus: 'approved' });
+
+        await auditLogs.create({
+            actionType: 'APPROVE_MEMBER',
+            originalData: JSON.stringify({ memberId, memberName: member.displayName }),
+            performedByUserId: userId,
+            householdId: household.id
+        });
+
+        res.json({ message: "Tag jóváhagyva." });
+    } catch (e) {
+        res.status(500).json({ message: "Hiba történt." });
+    }
+});
+
+// TAG ELTÁVOLÍTÁSA 
+router.delete('/members/:memberId', authMiddleware, async (req, res) => {
+    try {
+        const { memberId } = req.params;
+        const userId = req.user.id;
+
+        const household = await households.findOne({ where: { ownerId: userId } });
+        // Saját magát is kiléptetheti, vagy a tulajdonos törölhet mást
+        // Itt egyszerűsítünk: tegyük fel, hogy most a tulajdonos töröl
+        if (!household && userId !== memberId) return res.status(403).json({ message: "Nincs jogosultságod." });
+
+        const member = await users.findByPk(memberId);
+        if (!member) return res.status(404).json({ message: "Felhasználó nem található." });
+
+        // User adatainak resetelése
+        await member.update({ householdId: null, membershipStatus: 'pending' });
+
+        // Naplózás (ha van még household ID-nk hozzá)
+        if (household) {
+            await auditLogs.create({
+                actionType: 'REMOVE_MEMBER',
+                originalData: JSON.stringify({ memberName: member.displayName }),
+                performedByUserId: userId,
+                householdId: household.id
+            });
+        }
+
+        res.json({ message: "Tag eltávolítva." });
+    } catch (e) {
+        console.log(e);
+        res.status(500).json({ message: "Hiba történt." });
+    }
+});
+
+// MEGHÍVÓK LISTÁZÁSA 
+router.get('/invitations/list', authMiddleware, async (req, res) => { // Fontos: 'list' az útban, hogy ne ütközzön paraméterrel
+    try {
+        const user = await users.findByPk(req.user.id);
+        if (!user.householdId) return res.status(400).json({ message: "Nincs háztartásod." });
+
+        // Kell importálni az 'invitations' modellt a fájl elején!
+        const { invitations } = require('../dbHandler');
+
+        const list = await invitations.findAll({
+            where: { householdId: user.householdId, status: 'PENDING' }
+        });
+        res.json(list);
+    } catch (e) {
+        res.status(500).json({ message: "Hiba történt." });
+    }
+});
+
+// MEGHÍVÓ KÜLDÉSE 
+router.post('/invitations', authMiddleware, async (req, res) => {
+    try {
+        const { email } = req.body;
+        const user = await users.findByPk(req.user.id);
+        const { invitations } = require('../dbHandler');
+
+        if (!email) {
+            return res.status(400).json({ message: "Email cím megadása kötelező." });
+        }
+
+        // --- ÚJ ELLENŐRZÉS START ---
+
+        // 1. Megnézzük, létezik-e ilyen felhasználó a rendszerben
+        const targetUser = await users.findOne({ where: { email } });
+
+        if (!targetUser) {
+            return res.status(404).json({ message: "Nincs regisztrált felhasználó ezzel az email címmel." });
+        }
+
+        // 2. Extra biztonság: Ne hívhassuk meg saját magunkat
+        if (targetUser.id === user.id) {
+            return res.status(400).json({ message: "Saját magadat nem hívhatod meg." });
+        }
+
+        // 3. Extra biztonság: Ha már van háztartása, felesleges meghívni
+        if (targetUser.householdId) {
+            return res.status(400).json({ message: "Ez a felhasználó már tagja egy másik háztartásnak." });
+        }
+
+        // 4. Megnézzük, küldtünk-e már neki meghívót (hogy ne legyen duplikáció)
+        const existingInvite = await invitations.findOne({
+            where: {
+                email: email,
+                householdId: user.householdId,
+                status: 'PENDING'
+            }
+        });
+
+        if (existingInvite) {
+            return res.status(400).json({ message: "Ennek a felhasználónak már van függőben lévő meghívója." });
+        }
+
+        // --- ÚJ ELLENŐRZÉS VÉGE ---
+
+        // Ha minden oké, generáljuk a kódot
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+        const invite = await invitations.create({
+            email,
+            code,
+            householdId: user.householdId,
+            status: 'PENDING'
+        });
+
+        res.status(201).json(invite);
+
+    } catch (e) {
+        console.error("Meghívó hiba:", e);
+        res.status(500).json({ message: "Hiba történt a meghívó küldésekor." });
+    }
+});
+
+// MEGHÍVÓ VISSZAVONÁSA 
+router.delete('/invitations/:id', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { invitations } = require('../dbHandler');
+        await invitations.destroy({ where: { id } });
+        res.json({ message: "Törölve." });
+    } catch (e) {
+        res.status(500).json({ message: "Hiba történt." });
+    }
+});
+
+
 module.exports = router;

@@ -5,7 +5,7 @@ import { COLORS } from '../constants';
 import DashboardScreen from '../screens/DashboardScreen';
 import RecurringScreen from '../screens/RecurringScreen';
 import SavingsScreen from '../screens/SavingScreen';
-import ProfileScreen from '../screens/ProfilScreen';
+import SettingsNavigator from './SettingsNavigator';
 
 const Tab = createBottomTabNavigator();
 
@@ -57,9 +57,14 @@ const TabNavigator = () => {
                 options={{ tabBarLabel: 'Megtakarítás' }}
             />
             <Tab.Screen
-                name="Profile"
-                component={ProfileScreen}
-                options={{ tabBarLabel: 'Profil' }}
+                name="Settings"
+                component={SettingsNavigator}
+                options={{
+                    tabBarLabel: 'Beállítások',
+                    tabBarIcon: ({ color, size }) => (
+                        <MaterialCommunityIcons name="cog" size={size} color={color} />
+                    )
+                }}
             />
         </Tab.Navigator>
     );

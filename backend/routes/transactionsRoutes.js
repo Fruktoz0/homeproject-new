@@ -53,12 +53,16 @@ router.get('/', authMiddleware, async (req, res) => {
 // ÚJ TRANZAKCIÓ 
 router.post('/', authMiddleware, async (req, res) => {
     try {
-        const { amount, type, category, date, description, recurringItemId } = req.body;
+        let { amount, type, category, date, description, recurringItemId } = req.body;
         const userId = req.user.id;
 
+        // Ha nincs kategória, akkor "Egyéb"-t használjuk
+        if (!category) {
+            category = 'Egyéb';
+        }
         // Validálás
-        if (!amount || !type || !category || !date) {
-            return res.status(400).json({ message: "Hiányzó adatok (összeg, típus, kategória, dátum)!" });
+        if (!amount || !type || !date) {
+            return res.status(400).json({ message: "Hiányzó adatok (összeg, típus, dátum)!" });
         }
 
         const currentUser = await users.findByPk(userId);

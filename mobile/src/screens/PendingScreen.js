@@ -20,7 +20,7 @@ const PendingScreen = () => {
                 </Text>
 
                 <View style={{ marginTop: 30, width: '100%' }}>
-                    <Button title="Frissítés (Újra belépés)" onPress={logout} variant="outline" style={{ marginBottom: 10 }} />
+                    <Button title="Frissítés (Újra belépés)" onPress={logout} variant="ghost-outline" style={{ marginBottom: 10 }} />
                     <Button title="Kijelentkezés" onPress={logout} variant="danger" />
                 </View>
             </Card>
