@@ -135,7 +135,7 @@ const recurringItems = dbConnection.define("recurringItem", {
         allowNull: false,
     },
     'frequency': {
-        type: DataTypes.ENUM("MONTHLY", "QUARTERLY", "HALF-YEARLY", "YEARLY"),
+        type: DataTypes.ENUM("MONTHLY", "BIMONTHLY", "QUARTERLY", "HALF-YEARLY", "YEARLY"),
         defaultValue: "MONTHLY",
         allowNull: false,
     },
@@ -146,6 +146,11 @@ const recurringItems = dbConnection.define("recurringItem", {
     'autoPay': {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
+    },
+    'startDate': {
+        type: DataTypes.DATEONLY,
+        defaultValue: DataTypes.NOW,
+        allowNull: false,
     },
     'payDay': {
         type: DataTypes.INTEGER,

@@ -1,43 +1,96 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, FlatList, StyleSheet, Alert, TouchableOpacity, RefreshControl } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { getRecurringItems, createRecurringItem, deleteRecurringItem } from '../services/recurringService';
 import { getTransactions, createTransaction } from '../services/transactionService';
-import { getStartOfMonth, getEndOfMonth, formatDateToISO } from '../utils/dateUtils';
+import { getStartOfMonth, getEndOfMonth, formatDateToISO, addMonths, formatMonthYear } from '../utils/dateUtils';
 import { COLORS } from '../constants';
 import { Card, FloatingActionButton, SectionHeader, Button } from '../components/UIComponents';
-import { AddRecurringModal, PaymentModal, TransactionDetailsModal } from '../components/Modals'; // ÚJ IMPORT
+import { AddRecurringModal, PaymentModal, TransactionDetailsModal } from '../components/Modals';
 
 const RecurringScreen = () => {
-    const [items, setItems] = useState([]);
+    const [currentDate, setCurrentDate] = useState(new Date()); // A naptár szerinti nézet
+    const [realDate, setRealDate] = useState(new Date()); // A valós mai nap (referenciának)
+
+    const [allItems, setAllItems] = useState([]);
+    const [filteredItems, setFilteredItems] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [refreshing, setRefreshing] = useState(false);
 
     // Modals
     const [isAddModalVisible, setAddModalVisible] = useState(false);
     const [isPayModalVisible, setPayModalVisible] = useState(false);
-    const [isDetailModalVisible, setDetailModalVisible] = useState(false); // ÚJ STATE
+    const [isDetailModalVisible, setDetailModalVisible] = useState(false);
 
     const [selectedItem, setSelectedItem] = useState(null);
-    const [selectedTransaction, setSelectedTransaction] = useState(null); // ÚJ STATE
+    const [selectedTransaction, setSelectedTransaction] = useState(null);
+    const [paymentDate, setPaymentDate] = useState(''); // Ezt adjuk át a modalnak
 
-    // Adatok betöltése
     const loadData = async () => {
         try {
             const recurringData = await getRecurringItems();
-            const now = new Date();
-            const start = formatDateToISO(getStartOfMonth(now));
-            const end = formatDateToISO(getEndOfMonth(now));
-            const txData = await getTransactions(start, end);
+            setAllItems(recurringData);
 
-            setItems(recurringData);
+            const start = formatDateToISO(getStartOfMonth(currentDate));
+            const end = formatDateToISO(getEndOfMonth(currentDate));
+            const txData = await getTransactions(start, end);
             setTransactions(txData);
+
+            filterItemsForMonth(recurringData, currentDate);
         } catch (e) {
             console.log("Hiba a betöltéskor:", e);
         }
     };
+
+    // --- LOGIKA: Jövőben vagyunk-e? ---
+    const isFutureMonth = () => {
+        const viewYear = currentDate.getFullYear();
+        const viewMonth = currentDate.getMonth();
+
+        const realYear = realDate.getFullYear();
+        const realMonth = realDate.getMonth();
+
+        if (viewYear > realYear) return true;
+        if (viewYear === realYear && viewMonth > realMonth) return true;
+        return false;
+    };
+
+    const filterItemsForMonth = (items, viewDate) => {
+        const viewYear = viewDate.getFullYear();
+        const viewMonth = viewDate.getMonth();
+
+        const filtered = items.filter(item => {
+            if (!item.active) return false;
+            const start = item.startDate ? new Date(item.startDate) : new Date();
+            const startYear = start.getFullYear();
+            const startMonth = start.getMonth();
+            const monthDiff = (viewYear - startYear) * 12 + (viewMonth - startMonth);
+
+            if (monthDiff < 0) return false;
+
+            switch (item.frequency) {
+                case 'MONTHLY': return true;
+                case 'BIMONTHLY': return monthDiff % 2 === 0;
+                case 'QUARTERLY': return monthDiff % 3 === 0;
+                case 'YEARLY': return monthDiff % 12 === 0;
+                default: return true;
+            }
+        });
+        setFilteredItems(filtered);
+    };
+
+    useEffect(() => {
+        loadData();
+    }, [currentDate]);
+
+    useFocusEffect(
+        useCallback(() => {
+            setRealDate(new Date()); // Frissítjük a valós időt, ha visszatérünk
+            loadData();
+        }, [currentDate])
+    );
 
     const onRefresh = async () => {
         setRefreshing(true);
@@ -45,11 +98,8 @@ const RecurringScreen = () => {
         setRefreshing(false);
     };
 
-    useFocusEffect(
-        useCallback(() => {
-            loadData();
-        }, [])
-    );
+    const nextMonth = () => setCurrentDate(addMonths(currentDate, 1));
+    const prevMonth = () => setCurrentDate(addMonths(currentDate, -1));
 
     // --- MŰVELETEK ---
 
@@ -63,89 +113,72 @@ const RecurringScreen = () => {
     };
 
     const handleDelete = (item) => {
-        Alert.alert(
-            "Törlés",
-            `Biztosan törölni szeretnéd a(z) "${item.name}" tételt?`,
-            [
-                { text: "Mégsem", style: "cancel" },
-                {
-                    text: "Törlés",
-                    style: "destructive",
-                    onPress: async () => {
-                        try {
-                            await deleteRecurringItem(item.id);
-                            loadData();
-                        } catch (error) {
-                            Alert.alert("Hiba", "Nem sikerült a törlés.");
-                        }
-                    }
+        Alert.alert("Törlés", `Biztosan törölni szeretnéd a(z) "${item.name}" tételt?`, [
+            { text: "Mégsem", style: "cancel" },
+            {
+                text: "Törlés", style: "destructive", onPress: async () => {
+                    await deleteRecurringItem(item.id);
+                    loadData();
                 }
-            ]
-        );
+            }
+        ]);
     };
 
     const openPayModal = (item) => {
         setSelectedItem(item);
+
+        // JAVÍTÁS: Kiszámoljuk a helyes dátumot az adott hónapra
+        // Ha van 'payDay', akkor azt a napot vesszük a NÉZETT hónapban
+        // Ha nincs, akkor elsejét, vagy a mai napot (ha ugyanaz a hónap)
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+
+        let targetDay = item.payDay || 1;
+        // Figyelünk a hónap hosszára (pl. februárban ne legyen 30.)
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        if (targetDay > daysInMonth) targetDay = daysInMonth;
+
+        const calculatedDate = new Date(year, month, targetDay);
+        setPaymentDate(formatDateToISO(calculatedDate));
+
         setPayModalVisible(true);
     };
 
-    // ÚJ: Részletek megnyitása
     const openDetailModal = (tx) => {
         setSelectedTransaction(tx);
         setDetailModalVisible(true);
     };
 
     const handlePay = async (txData) => {
-        try {
-            await createTransaction(txData);
-            loadData();
-        } catch (error) {
-            console.log("Pay error:", error);
-            Alert.alert("Hiba", "Sikertelen rögzítés");
-        }
+        console.log("Küldött adatok:", txData);
+        await createTransaction(txData);
+        loadData();
     };
 
-    // --- UI SEGÉDFÜGGVÉNYEK ---
-    const formatMoney = (amount) => {
-        return new Intl.NumberFormat('hu-HU', {
-            style: 'currency',
-            currency: 'HUF',
-            maximumFractionDigits: 0
-        }).format(amount);
-    };
+    const formatMoney = (amount) => new Intl.NumberFormat('hu-HU', { style: 'currency', currency: 'HUF', maximumFractionDigits: 0 }).format(amount);
 
-    // --- LISTA ELEM ---
+    // --- RENDER ---
+
     const renderItem = ({ item }) => {
         const paidTx = transactions.find(t => t.recurringItemId === item.id);
         const isPaid = !!paidTx;
+        const isFuture = isFutureMonth(); // Ellenőrzés
 
-        // A kártya tartalmát külön változóba tesszük, hogy tisztább legyen
         const CardContent = (
             <View style={styles.row}>
-                {/* BAL OLDAL */}
                 <View style={styles.infoContainer}>
                     <View style={styles.headerRow}>
                         <Text style={styles.name}>{item.name}</Text>
-                        <Text style={styles.categoryDot}>•</Text>
-                        <Text style={styles.category}>{item.category || 'Egyéb'}</Text>
+                        <Text style={styles.category}>{item.category}</Text>
                     </View>
-
-                    {/* Tervezett összeg */}
-                    <Text style={styles.plannedText}>
-                        Tervezett: <Text style={styles.plannedAmount}>{formatMoney(item.amount)}</Text>
-                    </Text>
-
-                    {/* ÚJ: Tényleges összeg megjelenítése, ha fizetve van */}
+                    <Text style={styles.plannedText}>Tervezett: <Text style={styles.plannedAmount}>{formatMoney(item.amount)}</Text></Text>
                     {isPaid && (
-                        <Text style={styles.actualText}>
-                            Fizetve: <Text style={styles.actualAmount}>{formatMoney(paidTx.amount)}</Text>
-                        </Text>
+                        <Text style={styles.actualText}>Fizetve: <Text style={styles.actualAmount}>{formatMoney(paidTx.amount)}</Text></Text>
                     )}
-
                     <View style={styles.badgeContainer}>
                         <View style={styles.freqBadge}>
                             <Text style={styles.freqText}>
-                                {item.frequency === 'MONTHLY' ? 'Havi' : 'Éves'}
+                                {item.frequency === 'MONTHLY' ? 'Havi' : item.frequency === 'BIMONTHLY' ? '2 Havi' : item.frequency === 'QUARTERLY' ? 'Negyedéves' : 'Éves'}
                             </Text>
                         </View>
                         {item.autoPay && (
@@ -157,18 +190,20 @@ const RecurringScreen = () => {
                     </View>
                 </View>
 
-                {/* JOBB OLDAL */}
                 <View style={styles.actionContainer}>
                     {isPaid ? (
                         <View style={styles.paidBadge}>
-                            <MaterialCommunityIcons name="check" size={16} color={COLORS.success} />
+                            <MaterialCommunityIcons name="check" size={14} color={COLORS.success} />
                             <Text style={styles.paidText}>Befizetve</Text>
                         </View>
+                    ) : isFuture ? (
+                        // JAVÍTÁS: Ha jövőben van, inaktív állapot
+                        <View style={styles.futureBadge}>
+                            <MaterialCommunityIcons name="clock-outline" size={14} color={COLORS.textSecondary} />
+                            <Text style={styles.futureText}>Jövőbeli</Text>
+                        </View>
                     ) : (
-                        <TouchableOpacity
-                            style={styles.payBtn}
-                            onPress={() => openPayModal(item)}
-                        >
+                        <TouchableOpacity style={styles.payBtn} onPress={() => openPayModal(item)}>
                             <Text style={styles.payBtnText}>Befizetés</Text>
                         </TouchableOpacity>
                     )}
@@ -178,16 +213,11 @@ const RecurringScreen = () => {
 
         return (
             <Card style={styles.card}>
-                {/* Ha fizetve van, az egész kártya kattintható a részletekért */}
                 {isPaid ? (
                     <TouchableOpacity onPress={() => openDetailModal(paidTx)} activeOpacity={0.7}>
                         {CardContent}
                     </TouchableOpacity>
-                ) : (
-                    CardContent
-                )}
-
-                {/* Törlés gomb mindig elérhető */}
+                ) : CardContent}
                 <TouchableOpacity onPress={() => handleDelete(item)} style={styles.deleteIcon}>
                     <MaterialCommunityIcons name="close" size={18} color={COLORS.gray200} />
                 </TouchableOpacity>
@@ -197,21 +227,34 @@ const RecurringScreen = () => {
 
     return (
         <View style={styles.container}>
-            <SectionHeader title={`Aktív tételek (${items.length})`} />
+            <View style={styles.header}>
+                <View style={styles.dateSelector}>
+                    <TouchableOpacity onPress={prevMonth} style={styles.arrowBtn}>
+                        <MaterialCommunityIcons name="chevron-left" size={28} color="rgba(255,255,255,0.8)" />
+                    </TouchableOpacity>
+                    <Text style={styles.headerDate}>{formatMonthYear(currentDate)}</Text>
+                    <TouchableOpacity onPress={nextMonth} style={styles.arrowBtn}>
+                        <MaterialCommunityIcons name="chevron-right" size={28} color="rgba(255,255,255,0.8)" />
+                    </TouchableOpacity>
+                </View>
+                <Text style={styles.subTitle}>Fix költségek erre a hónapra</Text>
+            </View>
 
-            <FlatList
-                data={items}
-                renderItem={renderItem}
-                keyExtractor={item => item.id}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />}
-                contentContainerStyle={{ paddingBottom: 100 }}
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <MaterialCommunityIcons name="calendar-refresh" size={50} color={COLORS.gray200} />
-                        <Text style={styles.emptyText}>Nincs beállítva rendszeres költség.</Text>
-                    </View>
-                }
-            />
+            <View style={styles.listContainer}>
+                <FlatList
+                    data={filteredItems}
+                    renderItem={renderItem}
+                    keyExtractor={item => item.id}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />}
+                    contentContainerStyle={{ paddingBottom: 100 }}
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <MaterialCommunityIcons name="calendar-check" size={50} color={COLORS.gray200} />
+                            <Text style={styles.emptyText}>Erre a hónapra nincs esedékes fix tétel.</Text>
+                        </View>
+                    }
+                />
+            </View>
 
             <FloatingActionButton
                 icon={<MaterialCommunityIcons name="plus" size={30} color="#fff" />}
@@ -229,9 +272,9 @@ const RecurringScreen = () => {
                 item={selectedItem}
                 onClose={() => setPayModalVisible(false)}
                 onSubmit={handlePay}
+                defaultDate={paymentDate} // ÁTADJUK A SZÁMÍTOTT DÁTUMOT
             />
 
-            {/* ÚJ MODAL: Részletek */}
             <TransactionDetailsModal
                 visible={isDetailModalVisible}
                 transaction={selectedTransaction}
@@ -242,39 +285,41 @@ const RecurringScreen = () => {
 };
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: COLORS.background, padding: 20 },
+    container: { flex: 1, backgroundColor: COLORS.background },
+    header: { backgroundColor: COLORS.primary, paddingTop: 50, paddingBottom: 20, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, alignItems: 'center', marginBottom: 10 },
+    dateSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+    headerDate: { color: COLORS.white, fontSize: 18, fontWeight: 'bold', textTransform: 'capitalize', minWidth: 150, textAlign: 'center' },
+    arrowBtn: { padding: 5 },
+    subTitle: { color: 'rgba(255,255,255,0.8)', fontSize: 13, marginTop: 5 },
+    listContainer: { flex: 1, padding: 20, paddingTop: 10 },
     card: { padding: 15, marginBottom: 12, paddingRight: 30 },
-    row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }, // alignItems módosítva, hogy fentről induljanak
-
+    row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
     infoContainer: { flex: 1, marginRight: 10 },
     headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
     name: { fontSize: 16, fontWeight: 'bold', color: COLORS.textPrimary },
     categoryDot: { marginHorizontal: 5, color: COLORS.textSecondary },
     category: { fontSize: 12, color: COLORS.textSecondary },
-
-    plannedText: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 2 }, // Kisebb margin
+    plannedText: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 2 },
     plannedAmount: { fontWeight: 'bold', color: COLORS.textSecondary },
-
-    // ÚJ STÍLUSOK:
     actualText: { fontSize: 12, color: COLORS.success, marginBottom: 8, fontWeight: '600' },
     actualAmount: { fontWeight: 'bold' },
-
     badgeContainer: { flexDirection: 'row', gap: 6 },
     freqBadge: { backgroundColor: COLORS.gray200, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
     freqText: { fontSize: 10, color: COLORS.textSecondary, fontWeight: '600', textTransform: 'uppercase' },
     autoBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFCE54', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
     autoText: { fontSize: 10, fontWeight: 'bold', color: '#8a6d3b', marginLeft: 2 },
-
-    actionContainer: { justifyContent: 'center', paddingTop: 10 }, // Kis padding, hogy igazodjon
+    actionContainer: { justifyContent: 'center', paddingTop: 10 },
 
     payBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, elevation: 2 },
     payBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-
     paidBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E9', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
     paidText: { color: COLORS.success, fontWeight: 'bold', fontSize: 12, marginLeft: 4 },
 
-    deleteIcon: { position: 'absolute', top: 10, right: 10, padding: 5 },
+    // ÚJ: Jövőbeli státusz
+    futureBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.gray100, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+    futureText: { color: COLORS.textSecondary, fontWeight: 'bold', fontSize: 12, marginLeft: 4 },
 
+    deleteIcon: { position: 'absolute', top: 10, right: 10, padding: 5 },
     emptyContainer: { alignItems: 'center', marginTop: 50 },
     emptyText: { color: COLORS.textSecondary, fontWeight: 'bold', marginTop: 10, fontSize: 16 }
 });

@@ -57,6 +57,64 @@ router.put('/:id/balance', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         const { amountDiff, description } = req.body;
+        const userId = req.user.id;
+        const user = await users.findByPk(userId);
+
+        // 1. LEKÉRJÜK AZ ADATOT ÉS ELNEVEZZÜK 'saving'-NEK
+        const saving = await savingGoals.findByPk(id);
+
+        if (!saving) {
+            return res.status(404).json({ message: "Megtakarítási cél nem található." });
+        }
+
+        // Ellenőrzés: Jogosult-e módosítani (pl. ugyanaz a háztartás)
+        if (saving.householdId !== user.householdId) {
+            return res.status(403).json({ message: "Nincs jogosultságod ehhez a célhoz." });
+        }
+
+        // 2. SZÁMOLÁS
+        // Figyeljünk, hogy számként kezeljük az adatokat
+        const current = parseFloat(saving.currentAmount);
+        const diff = parseFloat(amountDiff);
+        const newBalance = current + diff;
+
+        // Validáció: Ne lehessen negatívba vinni az egyenleget (opcionális, de ajánlott)
+        if (newBalance < 0) {
+            return res.status(400).json({ message: "Nincs elég fedezet a kivéthez." });
+        }
+
+        // 3. MENTÉS
+        await saving.update({ currentAmount: newBalance });
+
+        // 4. NAPLÓZÁS (Itt volt a hiba: most már létezik a 'saving' változó)
+        const { auditLogs } = require('../dbHandler'); // Biztos, ami biztos importáljuk ide is, ha fent hiányozna
+
+        await auditLogs.create({
+            actionType: 'UPDATE_SAVING_BALANCE',
+            originalData: JSON.stringify({
+                savingId: saving.id,
+                name: saving.name,
+                diff: diff,
+                newBalance: newBalance,
+                description: description || (diff > 0 ? 'Befizetés' : 'Kivét')
+            }),
+            performedByUserId: userId,
+            householdId: user.householdId
+        });
+
+        res.json(saving);
+
+    } catch (e) {
+        console.error("Egyenleg módosítás hiba:", e); // Így látjuk a konzolon a pontos hibát
+        res.status(500).json({ message: "Hiba történt az egyenleg frissítésekor." });
+    }
+});
+
+// ADATOK MÓDOSÍTÁSA (Név, Célösszeg, Szín)
+router.put('/:id', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, targetAmount, color } = req.body;
         const user = await users.findByPk(req.user.id);
 
         const goal = await savingGoals.findByPk(id);
@@ -64,21 +122,21 @@ router.put('/:id/balance', authMiddleware, async (req, res) => {
         if (!goal) return res.status(404).json({ message: "Cél nem található." });
         if (goal.householdId !== user.householdId) return res.status(403).json({ message: "Nincs jogosultságod." });
 
-        if (!amountDiff) return res.status(400).json({ message: "Összeg megadása kötelező." });
+        // Mentsük el a régi adatokat a loghoz
+        const oldData = { name: goal.name, target: goal.targetAmount };
 
-        // Új egyenleg kiszámítása (számmá alakítjuk, hogy biztos ne szövegként fűzze össze)
-        const newBalance = Number(goal.currentAmount) + Number(amountDiff);
+        await goal.update({
+            name: name || goal.name,
+            targetAmount: targetAmount === '' ? null : (targetAmount || goal.targetAmount), // Ha üres string jön, nullázzuk
 
-        await goal.update({ currentAmount: newBalance });
+        });
 
-        // Naplózzuk a tranzakciót
         await auditLogs.create({
-            actionType: 'UPDATE_SAVING_BALANCE',
+            actionType: 'UPDATE_SAVING',
             originalData: JSON.stringify({
-                name: goal.name,
-                diff: amountDiff,
-                newBalance,
-                reason: description
+                savingId: goal.id,
+                old: oldData,
+                new: { name, target: targetAmount }
             }),
             performedByUserId: user.id,
             householdId: user.householdId
@@ -86,10 +144,11 @@ router.put('/:id/balance', authMiddleware, async (req, res) => {
 
         res.json(goal);
     } catch (error) {
-        console.error("Egyenleg módosítás hiba:", error);
+        console.error("Módosítási hiba:", error);
         res.status(500).json({ message: "Szerver hiba." });
     }
 });
+
 
 // TÖRLÉS
 router.delete('/:id', authMiddleware, async (req, res) => {

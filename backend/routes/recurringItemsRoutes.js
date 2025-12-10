@@ -29,7 +29,7 @@ router.get('/', authMiddleware, async (req, res) => {
 // LÉTREHOZÁS
 router.post('/', authMiddleware, async (req, res) => {
     try {
-        const { name, amount, frequency, category, autoPay, payDay } = req.body;
+        const { name, amount, frequency, category, autoPay, payDay, startDate } = req.body;
         const user = await users.findByPk(req.user.id);
 
         if (!user.householdId) return res.status(400).json({ message: "Nincs háztartásod." });
@@ -42,6 +42,7 @@ router.post('/', authMiddleware, async (req, res) => {
             active: true,
             autoPay: autoPay || false,
             payDay: payDay || null,
+            startDate: startDate || new Date(),
             householdId: user.householdId
         });
 

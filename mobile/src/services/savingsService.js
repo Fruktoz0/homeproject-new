@@ -19,3 +19,8 @@ export const deleteSavingGoal = async (id) => {
     const response = await api.delete(`/savings/${id}`);
     return response.data;
 };
+
+export const updateSavingGoal = async (id, data) => {
+    const response = await api.put(`/savings/${id}`, data);
+    return response.data;
+};
