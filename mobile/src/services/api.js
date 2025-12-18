@@ -1,7 +1,8 @@
 import axios from "axios";
 import * as SecureStore from "expo-secure-store";
 
-const API_URL = "http://188.6.212.136:3006/api";
+
+const API_URL = "http://newhomeproject.ddns.net:3006/api";
 
 const api = axios.create({
     baseURL: API_URL,
